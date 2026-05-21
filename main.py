@@ -85,7 +85,7 @@ intents.message_content = True
 bot = commands.InteractionBot(intents=intents)
 
 # MongoDB connection
-_mongo_uri = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
+_mongo_uri = os.environ.get("MONGO_URI", "mongodb+srv://ruslan:ruslan@cluster0.bujraxc.mongodb.net/?appName=Cluster0")
 _mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(  # type: ignore[type-arg]
     _mongo_uri, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000,
 )
