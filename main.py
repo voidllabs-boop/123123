@@ -6241,7 +6241,7 @@ async def rules_list(inter: disnake.ApplicationCommandInteraction) -> None:
     )
 
 
-@rules_group.sub_command(name="display", description="Отправить правила в канал (красивая панель)")
+@rules_group.sub_command(name="display", description="Отправить правила в канал")
 @commands.has_permissions(administrator=True)
 async def rules_display(
     inter: disnake.ApplicationCommandInteraction,
@@ -6308,6 +6308,91 @@ async def rules_setrole(
     await _respond(
         inter,
         simple("Настройка", f"Роль за принятие правил: {role.mention}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+_DEFAULT_RULES: list[dict[str, str]] = [
+    {
+        "title": "Уважение к участникам",
+        "text": "Запрещены оскорбления, травля, унижение, дискриминация по любому признаку. "
+                "Относитесь к другим так, как хотели бы, чтобы относились к вам.",
+    },
+    {
+        "title": "Запрет спама и флуда",
+        "text": "Не отправляйте повторяющиеся сообщения, бессмысленный текст, чрезмерное количество "
+                "символов или стикеров. Не злоупотребляйте упоминаниями (@everyone, @here, ролей).",
+    },
+    {
+        "title": "Запрет NSFW-контента",
+        "text": "Любой контент 18+ строго запрещен во всех каналах сервера, включая аватары, "
+                "никнеймы, статусы и медиафайлы.",
+    },
+    {
+        "title": "Запрет рекламы",
+        "text": "Запрещена реклама серверов, каналов, сайтов, товаров и услуг без разрешения "
+                "администрации. Это включает ссылки в личных сообщениях участникам.",
+    },
+    {
+        "title": "Общение по каналам",
+        "text": "Используйте каналы по назначению. Не засоряйте тематические каналы "
+                "нерелевантными сообщениями. Читайте описания каналов.",
+    },
+    {
+        "title": "Личная информация",
+        "text": "Запрещено публиковать личные данные других людей (доксинг): реальные имена, "
+                "адреса, номера телефонов, фотографии без согласия.",
+    },
+    {
+        "title": "Никнеймы и аватары",
+        "text": "Никнейм должен быть читаемым и не содержать оскорбительных выражений. "
+                "Запрещены никнеймы, имитирующие модераторов или других участников.",
+    },
+    {
+        "title": "Голосовые каналы",
+        "text": "Не используйте голосовые модификаторы, саундборды и музыку без согласия "
+                "остальных участников канала. Не переключайтесь между каналами.",
+    },
+    {
+        "title": "Подчинение модерации",
+        "text": "Решения модераторов обязательны к исполнению. Если вы не согласны с решением, "
+                "обратитесь через тикет или модмейл. Публичные споры с модерацией запрещены.",
+    },
+    {
+        "title": "Обход наказаний",
+        "text": "Создание альтернативных аккаунтов для обхода бана или мута приведет к "
+                "перманентному бану всех связанных аккаунтов.",
+    },
+]
+
+
+@rules_group.sub_command(name="default", description="Загрузить стандартные правила для сервера общения")
+@commands.has_permissions(administrator=True)
+async def rules_default(inter: disnake.ApplicationCommandInteraction) -> None:
+    assert inter.guild is not None
+    rules_data, flush = save("rules")
+    gk = _guild_key(inter.guild)
+    rules_data.setdefault(gk, {"rules": [], "accept_role": None, "channel": None})
+    ts = now_iso()
+    aid = str(inter.author.id)
+    for r in _DEFAULT_RULES:
+        rules_data[gk]["rules"].append({
+            "title": r["title"],
+            "text": r["text"],
+            "author": aid,
+            "ts": ts,
+        })
+    flush()
+    total = len(rules_data[gk]["rules"])
+    await _respond(
+        inter,
+        simple(
+            "Правила загружены",
+            f"Добавлено {len(_DEFAULT_RULES)} стандартных правил (всего: {total}).\n"
+            "Используйте /rules display для отправки в канал.",
+            "ok",
+            "Haven",
+        ),
         ephemeral=True,
     )
 
