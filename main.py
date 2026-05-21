@@ -19,6 +19,7 @@ A comprehensive, production-grade moderation bot with:
 from __future__ import annotations
 
 import asyncio
+import copy
 import io
 import json
 import os
@@ -85,7 +86,9 @@ bot = commands.InteractionBot(intents=intents)
 
 # MongoDB connection
 _mongo_uri = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
-_mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(_mongo_uri)  # type: ignore[type-arg]
+_mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(  # type: ignore[type-arg]
+    _mongo_uri, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000,
+)
 _db = _mongo_client[os.environ.get("MONGO_DB", "haven")]
 _mongo_ok = False  # set True after successful connection
 
@@ -149,7 +152,6 @@ async def _mongo_load_all() -> None:
 async def _mongo_write(col: str, data: dict) -> None:
     """Write data to MongoDB."""
     try:
-        import copy
         safe = copy.deepcopy(data)
         await _db[col].replace_one(
             {"_id": "root"}, {"_id": "root", "data": safe}, upsert=True,
