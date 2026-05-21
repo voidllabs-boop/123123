@@ -1,1 +1,2 @@
 disnake>=2.11
+aiohttp>=3.9
