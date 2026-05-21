@@ -87,6 +87,10 @@ bot = commands.InteractionBot(intents=intents)
 _mongo_uri = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 _mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(_mongo_uri)  # type: ignore[type-arg]
 _db = _mongo_client[os.environ.get("MONGO_DB", "haven")]
+_mongo_ok = False  # set True after successful connection
+
+# JSON fallback directory
+_JSON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 # In-memory caches for anti-spam / anti-raid
 _spam_cache: dict[int, list[float]] = defaultdict(list)
@@ -96,7 +100,7 @@ _snipe_cache: dict[int, dict[str, Any]] = {}
 _editsnipe_cache: dict[int, dict[str, Any]] = {}
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  STORAGE (MongoDB + in-memory cache)
+#  STORAGE (MongoDB primary, JSON fallback, in-memory cache)
 # ═══════════════════════════════════════════════════════════════════════════
 
 _store: dict[str, dict] = {}
@@ -110,26 +114,61 @@ _COLLECTIONS = [
 ]
 
 
+def _json_load(name: str) -> dict:
+    fp = os.path.join(_JSON_DIR, f"{name}.json")
+    if os.path.exists(fp):
+        with open(fp, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _json_save(name: str, data: dict) -> None:
+    os.makedirs(_JSON_DIR, exist_ok=True)
+    fp = os.path.join(_JSON_DIR, f"{name}.json")
+    with open(fp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 async def _mongo_load_all() -> None:
-    """Load all collections from MongoDB into memory cache on startup."""
-    for name in _COLLECTIONS:
-        doc = await _db[name].find_one({"_id": "root"})
-        _store[f"{name}.json"] = doc.get("data", {}) if doc else {}
+    """Load all data from MongoDB (or JSON fallback) into memory cache."""
+    global _mongo_ok
+    try:
+        await _db.command("ping")
+        _mongo_ok = True
+        print("MongoDB: connected")
+        for name in _COLLECTIONS:
+            doc = await _db[name].find_one({"_id": "root"})
+            _store[f"{name}.json"] = doc.get("data", {}) if doc else {}
+    except Exception as e:
+        _mongo_ok = False
+        print(f"MongoDB unavailable ({e}), using JSON fallback")
+        for name in _COLLECTIONS:
+            _store[f"{name}.json"] = _json_load(name)
 
 
 async def _mongo_write(col: str, data: dict) -> None:
+    """Write data to MongoDB."""
     try:
+        import copy
+        safe = copy.deepcopy(data)
         await _db[col].replace_one(
-            {"_id": "root"}, {"_id": "root", "data": data}, upsert=True,
+            {"_id": "root"}, {"_id": "root", "data": safe}, upsert=True,
         )
     except Exception:
         pass
 
 
-def _mongo_flush(key: str, data: dict) -> None:
-    """Schedule async write to MongoDB."""
+def _persist(key: str, data: dict) -> None:
+    """Persist data to storage backend (MongoDB or JSON)."""
     col = key.replace(".json", "")
-    asyncio.get_event_loop().create_task(_mongo_write(col, data))
+    if _mongo_ok:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_mongo_write(col, data))
+        except RuntimeError:
+            _json_save(col, data)
+    else:
+        _json_save(col, data)
 
 
 def _load(path: str, default: Any = None) -> Any:
@@ -142,7 +181,7 @@ def _load(path: str, default: Any = None) -> Any:
 def _save(path: str, data: Any) -> None:
     key = path if path.endswith(".json") else f"{path}.json"
     _store[key] = data
-    _mongo_flush(key, data)
+    _persist(key, data)
 
 
 def save(key: str) -> tuple[dict, Any]:
@@ -7928,7 +7967,7 @@ async def on_ready() -> None:
     await _mongo_load_all()
     print(f"Haven v{VERSION} is online as {bot.user} ({bot.user.id})")  # type: ignore[union-attr]
     print(f"Guilds: {len(bot.guilds)} | Commands: {len(list(bot.all_slash_commands))}")
-    print(f"MongoDB: {_mongo_uri}")
+    print(f"Storage: {'MongoDB' if _mongo_ok else 'JSON fallback'}")
     if not tempban_check.is_running():
         tempban_check.start()
     if not reminder_check.is_running():
