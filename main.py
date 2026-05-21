@@ -117,14 +117,19 @@ async def _mongo_load_all() -> None:
         _store[f"{name}.json"] = doc.get("data", {}) if doc else {}
 
 
+async def _mongo_write(col: str, data: dict) -> None:
+    try:
+        await _db[col].replace_one(
+            {"_id": "root"}, {"_id": "root", "data": data}, upsert=True,
+        )
+    except Exception:
+        pass
+
+
 def _mongo_flush(key: str, data: dict) -> None:
     """Schedule async write to MongoDB."""
     col = key.replace(".json", "")
-    asyncio.get_event_loop().create_task(
-        _db[col].replace_one(
-            {"_id": "root"}, {"_id": "root", "data": data}, upsert=True,
-        )
-    )
+    asyncio.get_event_loop().create_task(_mongo_write(col, data))
 
 
 def _load(path: str, default: Any = None) -> Any:
