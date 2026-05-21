@@ -28,7 +28,6 @@ import string
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 import disnake
@@ -41,6 +40,7 @@ from disnake import (
     SeparatorSpacing,
 )
 from disnake.ext import commands, tasks
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  CONSTANTS
@@ -56,7 +56,7 @@ COLORS: dict[str, int] = {
     "info": 0x5865F2,
 }
 
-VERSION = "5.0.0"
+VERSION = "6.0.0"
 TICKET_CATEGORY_NAME = "Tickets"
 ARCHIVE_CATEGORY_NAME = "Archived Tickets"
 MAX_TRANSCRIPT_MESSAGES = 500
@@ -83,8 +83,10 @@ intents.message_content = True
 
 bot = commands.InteractionBot(intents=intents)
 
-DATA = Path("data")
-DATA.mkdir(exist_ok=True)
+# MongoDB connection
+_mongo_uri = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
+_mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(_mongo_uri)  # type: ignore[type-arg]
+_db = _mongo_client[os.environ.get("MONGO_DB", "haven")]
 
 # In-memory caches for anti-spam / anti-raid
 _spam_cache: dict[int, list[float]] = defaultdict(list)
@@ -94,28 +96,55 @@ _snipe_cache: dict[int, dict[str, Any]] = {}
 _editsnipe_cache: dict[int, dict[str, Any]] = {}
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  STORAGE
+#  STORAGE (MongoDB + in-memory cache)
 # ═══════════════════════════════════════════════════════════════════════════
+
+_store: dict[str, dict] = {}
+
+_COLLECTIONS = [
+    "config", "warnings", "tickets", "tempbans", "cases", "notes",
+    "reactionroles", "customcmds", "autoresponders", "stickies",
+    "rules", "warnthresholds", "quarantined", "whitelist", "modmail",
+    "scheduled", "selfroles", "antinuke_trusted", "reports",
+    "suggestions", "reminders", "giveaways", "polls",
+]
+
+
+async def _mongo_load_all() -> None:
+    """Load all collections from MongoDB into memory cache on startup."""
+    for name in _COLLECTIONS:
+        doc = await _db[name].find_one({"_id": "root"})
+        _store[f"{name}.json"] = doc.get("data", {}) if doc else {}
+
+
+def _mongo_flush(key: str, data: dict) -> None:
+    """Schedule async write to MongoDB."""
+    col = key.replace(".json", "")
+    asyncio.get_event_loop().create_task(
+        _db[col].replace_one(
+            {"_id": "root"}, {"_id": "root", "data": data}, upsert=True,
+        )
+    )
 
 
 def _load(path: str, default: Any = None) -> Any:
-    fp = DATA / path
-    if fp.exists():
-        with fp.open("r", encoding="utf-8") as f:
-            return json.load(f)
+    key = path if path.endswith(".json") else f"{path}.json"
+    if key in _store:
+        return _store[key]
     return default if default is not None else {}
 
 
 def _save(path: str, data: Any) -> None:
-    fp = DATA / path
-    with fp.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    key = path if path.endswith(".json") else f"{path}.json"
+    _store[key] = data
+    _mongo_flush(key, data)
 
 
 def save(key: str) -> tuple[dict, Any]:
     """Return (data, flush) for a storage key."""
     path = f"{key}.json"
     data = _load(path, {})
+    _store[path] = data
 
     def flush() -> None:
         _save(path, data)
@@ -7806,8 +7835,10 @@ _bot_start_time = datetime.now(timezone.utc)
 
 @bot.event
 async def on_ready() -> None:
+    await _mongo_load_all()
     print(f"Haven v{VERSION} is online as {bot.user} ({bot.user.id})")  # type: ignore[union-attr]
     print(f"Guilds: {len(bot.guilds)} | Commands: {len(list(bot.all_slash_commands))}")
+    print(f"MongoDB: {_mongo_uri}")
     if not tempban_check.is_running():
         tempban_check.start()
     if not reminder_check.is_running():
