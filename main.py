@@ -56,7 +56,7 @@ COLORS: dict[str, int] = {
     "info": 0x5865F2,
 }
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 TICKET_CATEGORY_NAME = "Tickets"
 ARCHIVE_CATEGORY_NAME = "Archived Tickets"
 MAX_TRANSCRIPT_MESSAGES = 500
@@ -90,6 +90,8 @@ DATA.mkdir(exist_ok=True)
 _spam_cache: dict[int, list[float]] = defaultdict(list)
 _join_cache: dict[int, list[float]] = defaultdict(list)
 _afk_users: dict[str, dict[str, str]] = {}  # guild:user -> {message, ts}
+_snipe_cache: dict[int, dict[str, Any]] = {}
+_editsnipe_cache: dict[int, dict[str, Any]] = {}
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  STORAGE
@@ -3146,134 +3148,8 @@ def _remove_ticket_by_channel(guild: disnake.Guild, channel_id: str) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  AUTO-MODERATION ENGINE
+#  AFK HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
-
-
-@bot.event
-async def on_message(message: disnake.Message) -> None:
-    if message.author.bot or not message.guild:
-        return
-
-    assert isinstance(message.author, disnake.Member)
-
-    if message.author.guild_permissions.administrator:
-        return
-
-    _handle_afk_return(message)
-    await _handle_afk_mentions(message)
-
-    automod = get_automod_cfg(message.guild)
-
-    if automod.get("anti_spam"):
-        now = time.time()
-        uid = message.author.id
-        _spam_cache[uid] = [t for t in _spam_cache[uid] if now - t < ANTI_SPAM_WINDOW]
-        _spam_cache[uid].append(now)
-        if len(_spam_cache[uid]) >= ANTI_SPAM_THRESHOLD:
-            _spam_cache[uid].clear()
-            try:
-                await message.author.timeout(
-                    duration=timedelta(minutes=5),
-                    reason="Авто-модерация: спам",
-                )
-                add_case(message.guild, message.author, "auto-mute", message.guild.me, "Спам (авто-модерация)", "5м")
-                await message.channel.send(
-                    components=simple(
-                        "Авто-модерация",
-                        f"{message.author.mention} получил тайм-аут за спам",
-                        "warn",
-                        "Haven",
-                    ),
-                    flags=MessageFlags(is_components_v2=True),
-                )
-                await send_log(
-                    message.guild,
-                    simple(
-                        "Авто-модерация: Спам",
-                        f"**Участник:** {message.author.mention}\n**Канал:** {message.channel.mention}",
-                        "warn",
-                    ),
-                )
-            except disnake.Forbidden:
-                pass
-            return
-
-    if automod.get("anti_caps") and len(message.content) >= CAPS_MIN_LENGTH:
-        upper = sum(1 for c in message.content if c.isupper())
-        if upper / len(message.content) >= CAPS_THRESHOLD:
-            try:
-                await message.delete()
-                await message.channel.send(
-                    components=simple(
-                        "Авто-модерация",
-                        f"{message.author.mention}, не используйте чрезмерное количество заглавных букв",
-                        "warn",
-                        "Haven",
-                    ),
-                    flags=MessageFlags(is_components_v2=True),
-                )
-            except disnake.Forbidden:
-                pass
-            return
-
-    if automod.get("anti_invites") and INVITE_PATTERN.search(message.content):
-        try:
-            await message.delete()
-            await message.channel.send(
-                components=simple(
-                    "Авто-модерация",
-                    f"{message.author.mention}, ссылки-приглашения запрещены",
-                    "warn",
-                    "Haven",
-                ),
-                flags=MessageFlags(is_components_v2=True),
-            )
-            await send_log(
-                message.guild,
-                simple(
-                    "Авто-модерация: Инвайт",
-                    f"**Участник:** {message.author.mention}\n**Канал:** {message.channel.mention}\n**Текст:** {truncate(message.content, 200)}",
-                    "warn",
-                ),
-            )
-        except disnake.Forbidden:
-            pass
-        return
-
-    if automod.get("anti_links") and URL_PATTERN.search(message.content):
-        try:
-            await message.delete()
-            await message.channel.send(
-                components=simple(
-                    "Авто-модерация",
-                    f"{message.author.mention}, ссылки запрещены",
-                    "warn",
-                    "Haven",
-                ),
-                flags=MessageFlags(is_components_v2=True),
-            )
-        except disnake.Forbidden:
-            pass
-        return
-
-    if automod.get("anti_mentions"):
-        max_mentions = automod.get("max_mentions", MAX_MENTIONS_PER_MSG)
-        if len(message.mentions) > max_mentions:
-            try:
-                await message.delete()
-                await message.channel.send(
-                    components=simple(
-                        "Авто-модерация",
-                        f"{message.author.mention}, слишком много упоминаний ({len(message.mentions)}/{max_mentions})",
-                        "warn",
-                        "Haven",
-                    ),
-                    flags=MessageFlags(is_components_v2=True),
-                )
-            except disnake.Forbidden:
-                pass
-            return
 
 
 def _handle_afk_return(message: disnake.Message) -> None:
@@ -3314,47 +3190,7 @@ async def _handle_afk_mentions(message: disnake.Message) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-@bot.event
-async def on_member_join(member: disnake.Member) -> None:
-    cfg = get_cfg(member.guild)
 
-    automod = cfg.get("automod", {})
-    if automod.get("anti_raid"):
-        now = time.time()
-        gid = member.guild.id
-        _join_cache[gid] = [t for t in _join_cache[gid] if now - t < ANTI_RAID_WINDOW]
-        _join_cache[gid].append(now)
-        if len(_join_cache[gid]) >= ANTI_RAID_THRESHOLD:
-            _join_cache[gid].clear()
-            await send_log(
-                member.guild,
-                simple(
-                    "Анти-рейд",
-                    f"Обнаружен возможный рейд! {ANTI_RAID_THRESHOLD} входов за {ANTI_RAID_WINDOW} секунд.",
-                    "error",
-                    "Haven",
-                ),
-            )
-
-    ch_id = cfg.get("welcome_channel")
-    if ch_id:
-        ch = member.guild.get_channel(int(ch_id))
-        if ch and isinstance(ch, disnake.TextChannel):
-            avatar_url = member.display_avatar.url
-            account_age = datetime.now(timezone.utc) - member.created_at
-
-            comps = profile_card(
-                "Добро пожаловать!",
-                [
-                    f"{member.mention} присоединился к серверу.",
-                    f"**Участник #{member.guild.member_count}**",
-                    f"**Аккаунт создан:** {disnake.utils.format_dt(member.created_at, 'R')} ({fmt_dur(account_age)} назад)",
-                ],
-                avatar_url,
-                "ok",
-                f"Haven | {member.guild.name}",
-            )
-            await ch.send(components=comps, flags=MessageFlags(is_components_v2=True))
 
 
 @bot.event
@@ -3413,6 +3249,14 @@ async def on_member_update(before: disnake.Member, after: disnake.Member) -> Non
 async def on_message_delete(message: disnake.Message) -> None:
     if message.author.bot or not message.guild:
         return
+    _snipe_cache[message.channel.id] = {
+        "content": message.content or "(без текста)",
+        "author": str(message.author),
+        "author_id": message.author.id,
+        "avatar": message.author.display_avatar.url,
+        "ts": datetime.now(timezone.utc),
+        "attachments": [a.filename for a in message.attachments],
+    }
     text = truncate(message.content, 1000) if message.content else "(пусто)"
     attachments = ""
     if message.attachments:
@@ -3439,6 +3283,14 @@ async def on_message_edit(before: disnake.Message, after: disnake.Message) -> No
         return
     if before.content == after.content:
         return
+    _editsnipe_cache[before.channel.id] = {
+        "before": before.content or "(пусто)",
+        "after": after.content or "(пусто)",
+        "author": str(before.author),
+        "author_id": before.author.id,
+        "avatar": before.author.display_avatar.url,
+        "ts": datetime.now(timezone.utc),
+    }
     old = truncate(before.content, 500) if before.content else "(пусто)"
     new = truncate(after.content, 500) if after.content else "(пусто)"
     await send_log(
@@ -3633,6 +3485,1393 @@ async def on_slash_command_error(
             ephemeral=True,
         )
         raise error
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /snipe, /editsnipe
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="snipe",
+    description="Показать последнее удаленное сообщение в канале",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(manage_messages=True),
+)
+async def snipe_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
+    data = _snipe_cache.get(inter.channel.id)
+    if not data:
+        return await _respond(
+            inter,
+            simple("Snipe", "Нет удаленных сообщений в этом канале", "info", "Haven"),
+            ephemeral=True,
+        )
+    age = datetime.now(timezone.utc) - data["ts"]
+    text = truncate(data["content"], 1000)
+    attachments = ""
+    if data.get("attachments"):
+        attachments = f"\n**Вложения:** {', '.join(data['attachments'])}"
+    await _respond(
+        inter,
+        profile_card(
+            "Snipe",
+            [
+                f"**{data['author']}** ({data['author_id']})",
+                f"",
+                text,
+                attachments,
+                f"",
+                f"Удалено {fmt_dur(age)} назад",
+            ],
+            data["avatar"],
+            "error",
+            "Haven",
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.slash_command(
+    name="editsnipe",
+    description="Показать последнее отредактированное сообщение",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(manage_messages=True),
+)
+async def editsnipe_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
+    data = _editsnipe_cache.get(inter.channel.id)
+    if not data:
+        return await _respond(
+            inter,
+            simple("EditSnipe", "Нет отредактированных сообщений в этом канале", "info", "Haven"),
+            ephemeral=True,
+        )
+    age = datetime.now(timezone.utc) - data["ts"]
+    await _respond(
+        inter,
+        profile_card(
+            "EditSnipe",
+            [
+                f"**{data['author']}** ({data['author_id']})",
+                f"",
+                f"**Было:** {truncate(data['before'], 500)}",
+                f"**Стало:** {truncate(data['after'], 500)}",
+                f"",
+                f"Отредактировано {fmt_dur(age)} назад",
+            ],
+            data["avatar"],
+            "warn",
+            "Haven",
+        ),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /poll
+# ═══════════════════════════════════════════════════════════════════════════
+
+_poll_data: dict[str, dict[str, Any]] = {}
+
+
+@bot.slash_command(
+    name="poll",
+    contexts=GUILD_ONLY,
+)
+async def poll_group(inter: disnake.ApplicationCommandInteraction) -> None:
+    pass
+
+
+@poll_group.sub_command(name="create", description="Создать голосование")
+async def poll_create(
+    inter: disnake.ApplicationCommandInteraction,
+    question: str,
+    option1: str,
+    option2: str,
+    option3: str | None = None,
+    option4: str | None = None,
+    option5: str | None = None,
+    option6: str | None = None,
+    option7: str | None = None,
+    option8: str | None = None,
+) -> None:
+    assert inter.guild is not None
+    options = [o for o in [option1, option2, option3, option4, option5, option6, option7, option8] if o]
+    poll_id = _gen_id()
+
+    _poll_data[poll_id] = {
+        "question": question,
+        "options": options,
+        "votes": {str(i): [] for i in range(len(options))},
+        "author": str(inter.author.id),
+        "guild": str(inter.guild.id),
+        "ts": now_iso(),
+    }
+
+    children: list[Any] = [
+        disnake.ui.TextDisplay(f"### Голосование"),
+        disnake.ui.Separator(spacing=SeparatorSpacing.small),
+        disnake.ui.TextDisplay(f"**{question}**\n\nАвтор: {inter.author.mention}"),
+        disnake.ui.Separator(spacing=SeparatorSpacing.small),
+    ]
+
+    for i, opt in enumerate(options):
+        children.append(disnake.ui.TextDisplay(f"**{i + 1}.** {opt} -- 0 голосов"))
+
+    children.append(disnake.ui.Separator(spacing=SeparatorSpacing.small))
+
+    rows: list[list[Any]] = [[]]
+    for i, opt in enumerate(options):
+        if len(rows[-1]) >= 5:
+            rows.append([])
+        rows[-1].append(
+            disnake.ui.Button(
+                label=str(i + 1),
+                custom_id=f"poll_vote:{poll_id}:{i}",
+                style=ButtonStyle.secondary,
+            )
+        )
+
+    for row in rows:
+        if row:
+            children.append(disnake.ui.ActionRow(*row))
+
+    children.append(
+        disnake.ui.ActionRow(
+            disnake.ui.Button(
+                label="Завершить",
+                custom_id=f"poll_end:{poll_id}",
+                style=ButtonStyle.danger,
+            ),
+        )
+    )
+
+    comps = [disnake.ui.Container(*children, accent_colour=Color(COLORS["info"]))]
+
+    await inter.response.send_message(
+        components=comps,
+        flags=MessageFlags(is_components_v2=True),
+    )
+
+
+@bot.listen("on_button_click")
+async def poll_vote_btn(inter: disnake.MessageInteraction) -> None:
+    cid = inter.component.custom_id or ""
+    if not cid.startswith("poll_vote:"):
+        return
+    parts = cid.split(":", 2)
+    poll_id = parts[1]
+    option_idx = parts[2]
+
+    poll = _poll_data.get(poll_id)
+    if not poll:
+        return await _respond(inter, simple("Ошибка", "Голосование не найдено", "error"), ephemeral=True)
+
+    uid = str(inter.author.id)
+    for idx, voters in poll["votes"].items():
+        if uid in voters:
+            voters.remove(uid)
+
+    poll["votes"][option_idx].append(uid)
+    total = sum(len(v) for v in poll["votes"].values())
+    my_choice = poll["options"][int(option_idx)]
+
+    await _respond(
+        inter,
+        simple(
+            "Голос принят",
+            f"Вы проголосовали за: **{my_choice}**\nВсего голосов: {total}",
+            "ok",
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.listen("on_button_click")
+async def poll_end_btn(inter: disnake.MessageInteraction) -> None:
+    cid = inter.component.custom_id or ""
+    if not cid.startswith("poll_end:"):
+        return
+    poll_id = cid.split(":", 1)[1]
+    poll = _poll_data.get(poll_id)
+    if not poll:
+        return await _respond(inter, simple("Ошибка", "Голосование не найдено", "error"), ephemeral=True)
+
+    if str(inter.author.id) != poll["author"] and not inter.author.guild_permissions.administrator:  # type: ignore[union-attr]
+        return await _respond(inter, simple("Ошибка", "Только автор или администратор может завершить", "error"), ephemeral=True)
+
+    total = sum(len(v) for v in poll["votes"].values())
+    items: list[str] = []
+    for i, opt in enumerate(poll["options"]):
+        votes = len(poll["votes"][str(i)])
+        pct = f" ({votes * 100 // total}%)" if total > 0 else ""
+        bar_len = (votes * 20 // total) if total > 0 else 0
+        bar = "`" + "#" * bar_len + "-" * (20 - bar_len) + "`"
+        items.append(f"**{i + 1}.** {opt} -- {votes} голосов{pct}\n{bar}")
+
+    del _poll_data[poll_id]
+
+    await _respond(
+        inter,
+        list_card(
+            f"Итоги: {poll['question']}",
+            items,
+            "info",
+            f"Всего голосов: {total}",
+        ),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /starboard
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@setup_group.sub_command(name="starboard", description="Настроить starboard канал и порог")
+async def setup_starboard(
+    inter: disnake.ApplicationCommandInteraction,
+    channel: disnake.TextChannel,
+    threshold: int = commands.Param(default=3, ge=1, le=25, description="Минимум реакций для попадания"),
+    emoji: str = commands.Param(default="star", description="Реакция (star, fire, heart, thumbsup)"),
+) -> None:
+    emoji_map = {"star": "\u2b50", "fire": "\U0001f525", "heart": "\u2764\ufe0f", "thumbsup": "\U0001f44d"}
+    actual_emoji = emoji_map.get(emoji, "\u2b50")
+    set_cfg(inter.guild, "starboard_channel", str(channel.id))
+    set_cfg(inter.guild, "starboard_threshold", threshold)
+    set_cfg(inter.guild, "starboard_emoji", actual_emoji)
+    await _respond(
+        inter,
+        simple(
+            "Настройка",
+            f"Starboard: {channel.mention}\nПорог: {threshold} реакций\nЭмодзи: {actual_emoji}",
+            "ok",
+            "Haven",
+        ),
+        ephemeral=True,
+    )
+
+
+_starboard_sent: set[int] = set()
+
+
+@bot.event
+async def on_raw_reaction_add(payload: disnake.RawReactionActionEvent) -> None:
+    if not payload.guild_id:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    cfg = get_cfg(guild)
+    sb_channel_id = cfg.get("starboard_channel")
+    sb_threshold = cfg.get("starboard_threshold", 3)
+    sb_emoji = cfg.get("starboard_emoji", "\u2b50")
+    if not sb_channel_id:
+        return
+    if str(payload.emoji) != sb_emoji:
+        return
+    if payload.message_id in _starboard_sent:
+        return
+
+    channel = guild.get_channel(payload.channel_id)
+    if not isinstance(channel, disnake.TextChannel):
+        return
+
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except disnake.NotFound:
+        return
+
+    for reaction in message.reactions:
+        if str(reaction.emoji) == sb_emoji and reaction.count >= sb_threshold:
+            sb_channel = guild.get_channel(int(sb_channel_id))
+            if not sb_channel or not isinstance(sb_channel, disnake.TextChannel):
+                return
+            _starboard_sent.add(payload.message_id)
+            text = truncate(message.content, 500) if message.content else "(без текста)"
+            await sb_channel.send(
+                components=profile_card(
+                    f"Starboard ({sb_emoji} {reaction.count})",
+                    [
+                        f"**{message.author}** в {channel.mention}",
+                        "",
+                        text,
+                        "",
+                        f"[Перейти к сообщению]({message.jump_url})",
+                    ],
+                    message.author.display_avatar.url,
+                    "warn",
+                    f"Haven | {fmt_ts(message.created_at)}",
+                ),
+                flags=MessageFlags(is_components_v2=True),
+            )
+            break
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /autorole
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@setup_group.sub_command(name="autorole", description="Автоматическая роль при входе")
+async def setup_autorole(
+    inter: disnake.ApplicationCommandInteraction,
+    role: disnake.Role | None = None,
+) -> None:
+    if role:
+        set_cfg(inter.guild, "autorole", str(role.id))
+        await _respond(
+            inter,
+            simple("Настройка", f"Авто-роль: {role.mention}", "ok", "Haven"),
+            ephemeral=True,
+        )
+    else:
+        set_cfg(inter.guild, "autorole", None)
+        await _respond(
+            inter,
+            simple("Настройка", "Авто-роль отключена", "ok", "Haven"),
+            ephemeral=True,
+        )
+
+
+@setup_group.sub_command(name="welcomedm", description="Приветственное сообщение в ЛС")
+async def setup_welcomedm(
+    inter: disnake.ApplicationCommandInteraction,
+    message: str = commands.Param(description="Текст приветствия ({user} = упоминание, {server} = сервер)"),
+) -> None:
+    set_cfg(inter.guild, "welcome_dm", message)
+    await _respond(
+        inter,
+        simple("Настройка", f"Приветствие в ЛС: {message}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /nick
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="nick",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(manage_nicknames=True),
+)
+async def nick_group(inter: disnake.ApplicationCommandInteraction) -> None:
+    pass
+
+
+@nick_group.sub_command(name="set", description="Установить ник участнику")
+async def nick_set(
+    inter: disnake.ApplicationCommandInteraction,
+    member: disnake.Member,
+    nickname: str,
+) -> None:
+    old = member.display_name
+    await member.edit(nick=nickname, reason=f"Изменено {inter.author}")
+    await _respond(
+        inter,
+        simple("Ник изменен", f"{member.mention}: **{old}** -> **{nickname}**", "ok", "Haven"),
+        ephemeral=True,
+    )
+    await send_log(
+        inter.guild,  # type: ignore[arg-type]
+        simple(
+            "Ник изменен",
+            f"**Участник:** {member.mention}\n**Было:** {old}\n**Стало:** {nickname}\n**Модератор:** {inter.author.mention}",
+            "info",
+        ),
+    )
+
+
+@nick_group.sub_command(name="reset", description="Сбросить ник участника")
+async def nick_reset(
+    inter: disnake.ApplicationCommandInteraction,
+    member: disnake.Member,
+) -> None:
+    old = member.display_name
+    await member.edit(nick=None, reason=f"Сброшено {inter.author}")
+    await _respond(
+        inter,
+        simple("Ник сброшен", f"{member.mention}: **{old}** -> оригинальный", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /roleall
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="roleall",
+    description="Выдать или забрать роль у всех участников",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(administrator=True),
+)
+async def roleall_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    action: str = commands.Param(choices=["add", "remove"]),
+    role: disnake.Role = commands.Param(),
+) -> None:
+    assert inter.guild is not None
+    await inter.response.defer(ephemeral=True)
+    count = 0
+    errors = 0
+    for member in inter.guild.members:
+        if member.bot:
+            continue
+        try:
+            if action == "add" and role not in member.roles:
+                await member.add_roles(role, reason=f"Roleall by {inter.author}")
+                count += 1
+            elif action == "remove" and role in member.roles:
+                await member.remove_roles(role, reason=f"Roleall by {inter.author}")
+                count += 1
+        except disnake.Forbidden:
+            errors += 1
+    verb = "выдана" if action == "add" else "забрана"
+    text = f"Роль {role.mention} {verb} у {count} участников"
+    if errors:
+        text += f"\nОшибок: {errors}"
+    await inter.followup.send(
+        components=simple("Roleall", text, "ok", "Haven"),
+        flags=MessageFlags(is_components_v2=True),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /report (user reporting system)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="report",
+    description="Пожаловаться на участника модераторам",
+    contexts=GUILD_ONLY,
+)
+async def report_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    member: disnake.Member,
+    reason: str,
+) -> None:
+    assert inter.guild is not None
+    reports, flush = save("reports")
+    gk = _guild_key(inter.guild)
+    reports.setdefault(gk, [])
+    report_id = len(reports[gk]) + 1
+    reports[gk].append({
+        "id": report_id,
+        "target": str(member.id),
+        "target_name": str(member),
+        "reporter": str(inter.author.id),
+        "reporter_name": str(inter.author),
+        "reason": reason,
+        "ts": now_iso(),
+        "status": "open",
+    })
+    flush()
+
+    await _respond(
+        inter,
+        simple(
+            "Жалоба отправлена",
+            f"Жалоба #{report_id} на {member.mention} отправлена модераторам.\n**Причина:** {reason}",
+            "ok",
+            "Haven",
+        ),
+        ephemeral=True,
+    )
+
+    await send_log(
+        inter.guild,
+        card(
+            f"Жалоба #{report_id}",
+            [
+                ("Нарушитель", f"{member.mention} ({member.id})"),
+                ("Жалобщик", f"{inter.author.mention} ({inter.author.id})"),
+                ("Причина", reason),
+                ("Статус", "Открыта"),
+            ],
+            "warn",
+            "Haven",
+        ),
+    )
+
+
+@bot.slash_command(
+    name="reports",
+    description="Список жалоб",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(moderate_members=True),
+)
+async def reports_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    status: str = commands.Param(default="open", choices=["open", "closed", "all"]),
+) -> None:
+    reports = _load("reports.json", {})
+    gk = _guild_key(inter.guild)
+    all_reports = reports.get(gk, [])
+    if status != "all":
+        filtered = [r for r in all_reports if r["status"] == status]
+    else:
+        filtered = all_reports
+
+    if not filtered:
+        return await _respond(
+            inter,
+            simple("Жалобы", f"Нет жалоб (фильтр: {status})", "info", "Haven"),
+            ephemeral=True,
+        )
+
+    items: list[str] = []
+    for r in filtered[-15:]:
+        items.append(
+            f"**#{r['id']}** | <@{r['target']}> | {r['reason'][:50]} | {r['status']} | {r['ts'][:10]}"
+        )
+    await _respond(
+        inter,
+        list_card(
+            "Жалобы",
+            items,
+            "warn",
+            f"Всего: {len(filtered)} | Показаны последние {len(items)}",
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.slash_command(
+    name="resolve",
+    description="Закрыть жалобу",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(moderate_members=True),
+)
+async def resolve_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    report_id: int,
+) -> None:
+    reports, flush = save("reports")
+    gk = _guild_key(inter.guild)
+    all_reports = reports.get(gk, [])
+    for r in all_reports:
+        if r["id"] == report_id:
+            r["status"] = "closed"
+            r["resolved_by"] = str(inter.author.id)
+            r["resolved_at"] = now_iso()
+            flush()
+            return await _respond(
+                inter,
+                simple("Жалоба закрыта", f"Жалоба #{report_id} закрыта {inter.author.mention}", "ok", "Haven"),
+                ephemeral=True,
+            )
+    await _respond(
+        inter,
+        simple("Ошибка", f"Жалоба #{report_id} не найдена", "error"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /verify (verification system)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@setup_group.sub_command(name="verify", description="Настроить верификацию (роль + панель)")
+async def setup_verify(
+    inter: disnake.ApplicationCommandInteraction,
+    role: disnake.Role,
+    channel: disnake.TextChannel,
+    message: str = "Нажмите кнопку ниже для получения доступа к серверу.",
+) -> None:
+    set_cfg(inter.guild, "verify_role", str(role.id))
+    set_cfg(inter.guild, "verify_channel", str(channel.id))
+
+    panel = [
+        disnake.ui.Container(
+            disnake.ui.TextDisplay("### Верификация"),
+            disnake.ui.Separator(spacing=SeparatorSpacing.small),
+            disnake.ui.TextDisplay(message),
+            disnake.ui.Separator(spacing=SeparatorSpacing.small),
+            disnake.ui.ActionRow(
+                disnake.ui.Button(
+                    label="Подтвердить",
+                    custom_id="verify_btn",
+                    style=ButtonStyle.secondary,
+                ),
+            ),
+            accent_colour=Color(COLORS["ok"]),
+        )
+    ]
+    await channel.send(components=panel, flags=MessageFlags(is_components_v2=True))
+    await _respond(
+        inter,
+        simple("Настройка", f"Верификация: роль {role.mention}, канал {channel.mention}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+@bot.listen("on_button_click")
+async def verify_btn_click(inter: disnake.MessageInteraction) -> None:
+    if (inter.component.custom_id or "") != "verify_btn":
+        return
+    guild = inter.guild
+    if guild is None:
+        return
+    cfg = get_cfg(guild)
+    role_id = cfg.get("verify_role")
+    if not role_id:
+        return
+    role = guild.get_role(int(role_id))
+    if not role:
+        return await _respond(inter, simple("Ошибка", "Роль верификации не найдена", "error"), ephemeral=True)
+    member = inter.author
+    assert isinstance(member, disnake.Member)
+    if role in member.roles:
+        return await _respond(inter, simple("Верификация", "Вы уже верифицированы", "info"), ephemeral=True)
+    await member.add_roles(role, reason="Верификация")
+    await _respond(
+        inter,
+        simple("Верификация", "Вы успешно верифицированы!", "ok", "Haven"),
+        ephemeral=True,
+    )
+    await send_log(guild, simple("Верификация", f"{member.mention} верифицирован", "ok"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /whois
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="whois",
+    description="Подробная информация о пользователе по ID (даже не на сервере)",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(moderate_members=True),
+)
+async def whois_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    user_id: str,
+) -> None:
+    try:
+        user = await bot.fetch_user(int(user_id))
+    except (ValueError, disnake.NotFound):
+        return await _respond(
+            inter,
+            simple("Ошибка", "Пользователь не найден", "error"),
+            ephemeral=True,
+        )
+
+    created = disnake.utils.format_dt(user.created_at, "F")
+    created_r = disnake.utils.format_dt(user.created_at, "R")
+
+    lines = [
+        f"**Тег:** {user}",
+        f"**ID:** {user.id}",
+        f"**Бот:** {'Да' if user.bot else 'Нет'}",
+        f"**Создан:** {created} ({created_r})",
+    ]
+
+    assert inter.guild is not None
+    member = inter.guild.get_member(user.id)
+    if member:
+        lines.append(f"**На сервере:** Да")
+        if member.joined_at:
+            lines.append(f"**Присоединился:** {disnake.utils.format_dt(member.joined_at, 'F')}")
+        warn_count = len(_load("warnings.json", {}).get(_guild_key(inter.guild), {}).get(str(user.id), []))
+        case_count = get_case_count(inter.guild, user)
+        lines.append(f"**Варнов:** {warn_count} | **Кейсов:** {case_count}")
+    else:
+        lines.append(f"**На сервере:** Нет")
+
+    try:
+        ban = await inter.guild.fetch_ban(user)
+        lines.append(f"**Забанен:** Да (причина: {ban.reason or 'N/A'})")
+    except disnake.NotFound:
+        lines.append(f"**Забанен:** Нет")
+
+    await _respond(
+        inter,
+        profile_card("Whois", lines, user.display_avatar.url, "info", "Haven"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /invites
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="invites",
+    description="Топ приглашений на сервере",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(manage_guild=True),
+)
+async def invites_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
+    assert inter.guild is not None
+    invites = await inter.guild.invites()
+    if not invites:
+        return await _respond(
+            inter,
+            simple("Приглашения", "Нет активных приглашений", "info"),
+            ephemeral=True,
+        )
+
+    sorted_invites = sorted(invites, key=lambda i: i.uses or 0, reverse=True)[:15]
+    items: list[str] = []
+    for inv in sorted_invites:
+        inviter = inv.inviter.mention if inv.inviter else "N/A"
+        items.append(f"**{inv.code}** | {inviter} | {inv.uses or 0} использований | {inv.channel.mention if inv.channel else 'N/A'}")  # type: ignore[union-attr]
+
+    await _respond(
+        inter,
+        list_card(
+            "Приглашения",
+            items,
+            "info",
+            f"Всего: {len(invites)} активных приглашений",
+        ),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /tempbans, /banlist
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="tempbans",
+    description="Список активных временных банов",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(ban_members=True),
+)
+async def tempbans_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
+    tempbans = _load("tempbans.json", {})
+    gk = _guild_key(inter.guild)
+    guild_bans = tempbans.get(gk, {})
+    if not guild_bans:
+        return await _respond(
+            inter,
+            simple("Временные баны", "Нет активных временных банов", "info"),
+            ephemeral=True,
+        )
+    now = now_ts()
+    items: list[str] = []
+    for uid, entry in guild_bans.items():
+        remaining = entry["expires"] - now
+        if remaining > 0:
+            items.append(
+                f"<@{uid}> ({uid}) | Осталось: {fmt_dur(timedelta(seconds=remaining))} | Причина: {entry.get('reason', 'N/A')}"
+            )
+    if not items:
+        return await _respond(
+            inter,
+            simple("Временные баны", "Нет активных временных банов", "info"),
+            ephemeral=True,
+        )
+    await _respond(
+        inter,
+        list_card("Временные баны", items, "error", f"Всего: {len(items)}"),
+        ephemeral=True,
+    )
+
+
+@bot.slash_command(
+    name="banlist",
+    description="Список забаненных (последние 25)",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(ban_members=True),
+)
+async def banlist_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
+    assert inter.guild is not None
+    await inter.response.defer(ephemeral=True)
+    bans: list[disnake.BanEntry] = []
+    async for ban in inter.guild.bans(limit=25):
+        bans.append(ban)
+    if not bans:
+        return await inter.followup.send(
+            components=simple("Бан-лист", "Список банов пуст", "info"),
+            flags=MessageFlags(is_components_v2=True),
+            ephemeral=True,
+        )
+    items: list[str] = []
+    for ban in bans:
+        items.append(f"**{ban.user}** ({ban.user.id}) | {ban.reason or 'Без причины'}")
+    await inter.followup.send(
+        components=list_card("Бан-лист", items, "error", f"Показаны последние {len(items)}"),
+        flags=MessageFlags(is_components_v2=True),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /modleaderboard
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="modleaderboard",
+    description="Топ модераторов по количеству действий",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(moderate_members=True),
+)
+async def modleaderboard_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
+    cases = _load("cases.json", {})
+    gk = _guild_key(inter.guild)
+    guild_cases = cases.get(gk, {})
+
+    mod_counts: dict[str, int] = defaultdict(int)
+    for user_cases in guild_cases.values():
+        for c in user_cases:
+            mod_counts[c["mod"]] += 1
+
+    if not mod_counts:
+        return await _respond(
+            inter,
+            simple("Лидерборд", "Нет данных модерации", "info"),
+            ephemeral=True,
+        )
+
+    sorted_mods = sorted(mod_counts.items(), key=lambda x: -x[1])[:10]
+    items: list[str] = []
+    for i, (mod_id, count) in enumerate(sorted_mods, 1):
+        medal = {1: "[1]", 2: "[2]", 3: "[3]"}.get(i, f"[{i}]")
+        items.append(f"**{medal}** <@{mod_id}> -- {_plural(count, 'действие', 'действия', 'действий')}")
+
+    await _respond(
+        inter,
+        list_card("Лидерборд модераторов", items, "info", "Haven"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /emojiinfo
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="emojiinfo",
+    description="Информация об эмодзи сервера",
+    contexts=GUILD_ONLY,
+)
+async def emojiinfo_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    emoji: disnake.Emoji | None = None,
+) -> None:
+    assert inter.guild is not None
+    if emoji:
+        fields = [
+            ("Имя", emoji.name),
+            ("ID", str(emoji.id)),
+            ("Анимированный", "Да" if emoji.animated else "Нет"),
+            ("Создан", disnake.utils.format_dt(emoji.created_at, "F")),
+            ("URL", emoji.url),
+        ]
+        await _respond(
+            inter,
+            card(f"Эмодзи: {emoji.name}", fields, "info", "Haven"),
+            ephemeral=True,
+        )
+    else:
+        regular = [e for e in inter.guild.emojis if not e.animated]
+        animated = [e for e in inter.guild.emojis if e.animated]
+        await _respond(
+            inter,
+            card(
+                "Эмодзи сервера",
+                [
+                    ("Всего", str(len(inter.guild.emojis))),
+                    ("Обычных", str(len(regular))),
+                    ("Анимированных", str(len(animated))),
+                    ("Лимит", str(inter.guild.emoji_limit)),
+                ],
+                "info",
+                "Haven",
+            ),
+            ephemeral=True,
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /counting
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@setup_group.sub_command(name="counting", description="Настроить канал-счетчик")
+async def setup_counting(
+    inter: disnake.ApplicationCommandInteraction,
+    channel: disnake.TextChannel,
+) -> None:
+    set_cfg(inter.guild, "counting_channel", str(channel.id))
+    set_cfg(inter.guild, "counting_current", 0)
+    set_cfg(inter.guild, "counting_last_user", None)
+    await _respond(
+        inter,
+        simple("Настройка", f"Канал-счетчик: {channel.mention}\nСчет начат с 0.", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /suggest
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@setup_group.sub_command(name="suggestions", description="Канал для предложений")
+async def setup_suggestions(
+    inter: disnake.ApplicationCommandInteraction,
+    channel: disnake.TextChannel,
+) -> None:
+    set_cfg(inter.guild, "suggestions_channel", str(channel.id))
+    await _respond(
+        inter,
+        simple("Настройка", f"Канал предложений: {channel.mention}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+@bot.slash_command(
+    name="suggest",
+    description="Отправить предложение",
+    contexts=GUILD_ONLY,
+)
+async def suggest_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    suggestion: str,
+) -> None:
+    assert inter.guild is not None
+    cfg = get_cfg(inter.guild)
+    ch_id = cfg.get("suggestions_channel")
+    if not ch_id:
+        return await _respond(
+            inter,
+            simple("Ошибка", "Канал предложений не настроен. Попросите администратора использовать /setup suggestions", "error"),
+            ephemeral=True,
+        )
+
+    channel = inter.guild.get_channel(int(ch_id))
+    if not channel or not isinstance(channel, disnake.TextChannel):
+        return await _respond(inter, simple("Ошибка", "Канал не найден", "error"), ephemeral=True)
+
+    suggestions, flush = save("suggestions")
+    gk = _guild_key(inter.guild)
+    suggestions.setdefault(gk, [])
+    sg_id = len(suggestions[gk]) + 1
+    suggestions[gk].append({
+        "id": sg_id,
+        "text": suggestion,
+        "author": str(inter.author.id),
+        "author_name": str(inter.author),
+        "ts": now_iso(),
+        "votes_up": [],
+        "votes_down": [],
+        "status": "open",
+    })
+    flush()
+
+    comps = [
+        disnake.ui.Container(
+            disnake.ui.Section(
+                disnake.ui.TextDisplay(
+                    f"### Предложение #{sg_id}\n\n"
+                    f"{suggestion}\n\n"
+                    f"**Автор:** {inter.author.mention}\n"
+                    f"**За:** 0 | **Против:** 0"
+                ),
+                accessory=disnake.ui.Thumbnail(inter.author.display_avatar.url),
+            ),
+            disnake.ui.Separator(spacing=SeparatorSpacing.small),
+            disnake.ui.ActionRow(
+                disnake.ui.Button(
+                    label="За",
+                    custom_id=f"suggest_up:{gk}:{sg_id}",
+                    style=ButtonStyle.secondary,
+                ),
+                disnake.ui.Button(
+                    label="Против",
+                    custom_id=f"suggest_down:{gk}:{sg_id}",
+                    style=ButtonStyle.secondary,
+                ),
+            ),
+            accent_colour=Color(COLORS["info"]),
+        )
+    ]
+
+    await channel.send(components=comps, flags=MessageFlags(is_components_v2=True))
+    await _respond(
+        inter,
+        simple("Предложение", f"Предложение #{sg_id} отправлено в {channel.mention}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+@bot.listen("on_button_click")
+async def suggest_vote_btn(inter: disnake.MessageInteraction) -> None:
+    cid = inter.component.custom_id or ""
+    if not cid.startswith("suggest_up:") and not cid.startswith("suggest_down:"):
+        return
+    parts = cid.split(":", 2)
+    vote_type = "up" if "up" in parts[0] else "down"
+    gk = parts[1]
+    sg_id = int(parts[2])
+
+    suggestions, flush = save("suggestions")
+    sg_list = suggestions.get(gk, [])
+    sg = None
+    for s in sg_list:
+        if s["id"] == sg_id:
+            sg = s
+            break
+    if not sg:
+        return await _respond(inter, simple("Ошибка", "Предложение не найдено", "error"), ephemeral=True)
+
+    uid = str(inter.author.id)
+    if uid in sg["votes_up"]:
+        sg["votes_up"].remove(uid)
+    if uid in sg["votes_down"]:
+        sg["votes_down"].remove(uid)
+
+    if vote_type == "up":
+        sg["votes_up"].append(uid)
+    else:
+        sg["votes_down"].append(uid)
+    flush()
+
+    await _respond(
+        inter,
+        simple(
+            "Голос принят",
+            f"За: {len(sg['votes_up'])} | Против: {len(sg['votes_down'])}",
+            "ok",
+        ),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /embed (simple text panel builder)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.slash_command(
+    name="say",
+    description="Отправить сообщение от имени бота",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(manage_messages=True),
+)
+async def say_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    text: str,
+    channel: disnake.TextChannel | None = None,
+    color: str = commands.Param(default="plain", choices=["plain", "ok", "warn", "error", "info"]),
+) -> None:
+    target = channel or inter.channel
+    assert isinstance(target, disnake.TextChannel)
+    await target.send(
+        components=simple("Haven", text, color),
+        flags=MessageFlags(is_components_v2=True),
+    )
+    await _respond(
+        inter,
+        simple("Отправлено", f"Сообщение отправлено в {target.mention}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+@bot.slash_command(
+    name="announce",
+    description="Отправить объявление",
+    contexts=GUILD_ONLY,
+    default_member_permissions=disnake.Permissions(manage_guild=True),
+)
+async def announce_cmd(
+    inter: disnake.ApplicationCommandInteraction,
+    title: str,
+    text: str,
+    channel: disnake.TextChannel | None = None,
+) -> None:
+    target = channel or inter.channel
+    assert isinstance(target, disnake.TextChannel)
+
+    comps = [
+        disnake.ui.Container(
+            disnake.ui.TextDisplay(f"### {title}"),
+            disnake.ui.Separator(spacing=SeparatorSpacing.small),
+            disnake.ui.TextDisplay(text),
+            disnake.ui.Separator(spacing=SeparatorSpacing.small),
+            disnake.ui.TextDisplay(f"-# {inter.author} | {fmt_ts(datetime.now(timezone.utc))}"),
+            accent_colour=Color(COLORS["info"]),
+        )
+    ]
+    await target.send(components=comps, flags=MessageFlags(is_components_v2=True))
+    await _respond(
+        inter,
+        simple("Отправлено", f"Объявление отправлено в {target.mention}", "ok", "Haven"),
+        ephemeral=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Enhanced on_member_join (autorole + welcome DM + anti-alt)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.event
+async def on_member_join(member: disnake.Member) -> None:
+    cfg = get_cfg(member.guild)
+
+    autorole_id = cfg.get("autorole")
+    if autorole_id:
+        role = member.guild.get_role(int(autorole_id))
+        if role:
+            try:
+                await member.add_roles(role, reason="Авто-роль")
+            except disnake.Forbidden:
+                pass
+
+    welcome_dm = cfg.get("welcome_dm")
+    if welcome_dm:
+        text = welcome_dm.replace("{user}", member.mention).replace("{server}", member.guild.name)
+        try:
+            await member.send(
+                components=simple(f"Haven -- {member.guild.name}", text, "ok"),
+                flags=MessageFlags(is_components_v2=True),
+            )
+        except disnake.Forbidden:
+            pass
+
+    account_age = datetime.now(timezone.utc) - member.created_at
+    automod = cfg.get("automod", {})
+    if automod.get("anti_raid") and account_age < timedelta(days=7):
+        await send_log(
+            member.guild,
+            card(
+                "Подозрительный аккаунт",
+                [
+                    ("Участник", f"{member.mention} ({member.id})"),
+                    ("Возраст аккаунта", fmt_dur(account_age)),
+                ],
+                "warn",
+                "Haven | Возможный альт-аккаунт",
+            ),
+        )
+
+    now = time.time()
+    gid = member.guild.id
+    _join_cache[gid] = [t for t in _join_cache[gid] if now - t < ANTI_RAID_WINDOW]
+    _join_cache[gid].append(now)
+    if automod.get("anti_raid") and len(_join_cache[gid]) >= ANTI_RAID_THRESHOLD:
+        _join_cache[gid].clear()
+        await send_log(
+            member.guild,
+            simple(
+                "Анти-рейд",
+                f"Обнаружен возможный рейд! {ANTI_RAID_THRESHOLD} входов за {ANTI_RAID_WINDOW} секунд.",
+                "error",
+                "Haven",
+            ),
+        )
+
+    ch_id = cfg.get("welcome_channel")
+    if ch_id:
+        ch = member.guild.get_channel(int(ch_id))
+        if ch and isinstance(ch, disnake.TextChannel):
+            avatar_url = member.display_avatar.url
+            comps = profile_card(
+                "Добро пожаловать!",
+                [
+                    f"{member.mention} присоединился к серверу.",
+                    f"**Участник #{member.guild.member_count}**",
+                    f"**Аккаунт создан:** {disnake.utils.format_dt(member.created_at, 'R')} ({fmt_dur(account_age)} назад)",
+                ],
+                avatar_url,
+                "ok",
+                f"Haven | {member.guild.name}",
+            )
+            await ch.send(components=comps, flags=MessageFlags(is_components_v2=True))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Main on_message handler (counting + automod + AFK)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@bot.event
+async def on_message(message: disnake.Message) -> None:
+    if message.author.bot or not message.guild:
+        return
+
+    cfg = get_cfg(message.guild)
+    counting_channel = cfg.get("counting_channel")
+    if counting_channel and str(message.channel.id) == counting_channel:
+        current = cfg.get("counting_current", 0)
+        last_user = cfg.get("counting_last_user")
+
+        try:
+            num = int(message.content.strip())
+        except ValueError:
+            await message.delete()
+            return
+
+        if str(message.author.id) == last_user:
+            await message.delete()
+            try:
+                await message.channel.send(
+                    components=simple("Счетчик", f"{message.author.mention}, нельзя считать два раза подряд!", "warn"),
+                    flags=MessageFlags(is_components_v2=True),
+                    delete_after=5,
+                )
+            except Exception:
+                pass
+            return
+
+        if num != current + 1:
+            set_cfg(message.guild, "counting_current", 0)
+            set_cfg(message.guild, "counting_last_user", None)
+            try:
+                await message.channel.send(
+                    components=simple(
+                        "Счетчик",
+                        f"{message.author.mention} ошибся! Правильное число было **{current + 1}**. Счет сброшен.",
+                        "error",
+                    ),
+                    flags=MessageFlags(is_components_v2=True),
+                )
+            except Exception:
+                pass
+            return
+
+        set_cfg(message.guild, "counting_current", num)
+        set_cfg(message.guild, "counting_last_user", str(message.author.id))
+        try:
+            await message.add_reaction("\u2705")
+        except Exception:
+            pass
+        return
+
+    assert isinstance(message.author, disnake.Member)
+
+    if message.author.guild_permissions.administrator:
+        _handle_afk_return(message)
+        await _handle_afk_mentions(message)
+        return
+
+    _handle_afk_return(message)
+    await _handle_afk_mentions(message)
+
+    automod = get_automod_cfg(message.guild)
+
+    if automod.get("anti_spam"):
+        now = time.time()
+        uid = message.author.id
+        _spam_cache[uid] = [t for t in _spam_cache[uid] if now - t < ANTI_SPAM_WINDOW]
+        _spam_cache[uid].append(now)
+        if len(_spam_cache[uid]) >= ANTI_SPAM_THRESHOLD:
+            _spam_cache[uid].clear()
+            try:
+                await message.author.timeout(
+                    duration=timedelta(minutes=5),
+                    reason="Авто-модерация: спам",
+                )
+                add_case(message.guild, message.author, "auto-mute", message.guild.me, "Спам (авто-модерация)", "5м")
+                await message.channel.send(
+                    components=simple(
+                        "Авто-модерация",
+                        f"{message.author.mention} получил тайм-аут за спам",
+                        "warn",
+                        "Haven",
+                    ),
+                    flags=MessageFlags(is_components_v2=True),
+                )
+                await send_log(
+                    message.guild,
+                    simple(
+                        "Авто-модерация: Спам",
+                        f"**Участник:** {message.author.mention}\n**Канал:** {message.channel.mention}",
+                        "warn",
+                    ),
+                )
+            except disnake.Forbidden:
+                pass
+            return
+
+    if automod.get("anti_caps") and len(message.content) >= CAPS_MIN_LENGTH:
+        upper = sum(1 for c in message.content if c.isupper())
+        if upper / len(message.content) >= CAPS_THRESHOLD:
+            try:
+                await message.delete()
+                await message.channel.send(
+                    components=simple(
+                        "Авто-модерация",
+                        f"{message.author.mention}, не используйте чрезмерное количество заглавных букв",
+                        "warn",
+                        "Haven",
+                    ),
+                    flags=MessageFlags(is_components_v2=True),
+                )
+            except disnake.Forbidden:
+                pass
+            return
+
+    if automod.get("anti_invites") and INVITE_PATTERN.search(message.content):
+        try:
+            await message.delete()
+            await message.channel.send(
+                components=simple(
+                    "Авто-модерация",
+                    f"{message.author.mention}, ссылки-приглашения запрещены",
+                    "warn",
+                    "Haven",
+                ),
+                flags=MessageFlags(is_components_v2=True),
+            )
+            await send_log(
+                message.guild,
+                simple(
+                    "Авто-модерация: Инвайт",
+                    f"**Участник:** {message.author.mention}\n**Канал:** {message.channel.mention}\n**Текст:** {truncate(message.content, 200)}",
+                    "warn",
+                ),
+            )
+        except disnake.Forbidden:
+            pass
+        return
+
+    if automod.get("anti_links") and URL_PATTERN.search(message.content):
+        try:
+            await message.delete()
+            await message.channel.send(
+                components=simple(
+                    "Авто-модерация",
+                    f"{message.author.mention}, ссылки запрещены",
+                    "warn",
+                    "Haven",
+                ),
+                flags=MessageFlags(is_components_v2=True),
+            )
+        except disnake.Forbidden:
+            pass
+        return
+
+    if automod.get("anti_mentions"):
+        max_mentions = automod.get("max_mentions", MAX_MENTIONS_PER_MSG)
+        if len(message.mentions) > max_mentions:
+            try:
+                await message.delete()
+                await message.channel.send(
+                    components=simple(
+                        "Авто-модерация",
+                        f"{message.author.mention}, слишком много упоминаний ({len(message.mentions)}/{max_mentions})",
+                        "warn",
+                        "Haven",
+                    ),
+                    flags=MessageFlags(is_components_v2=True),
+                )
+            except disnake.Forbidden:
+                pass
+            return
 
 
 # ═══════════════════════════════════════════════════════════════════════════
