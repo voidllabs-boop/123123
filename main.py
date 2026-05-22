@@ -7931,7 +7931,6 @@ async def exportcases_cmd(inter: disnake.ApplicationCommandInteraction) -> None:
 
 _bot_start_time = datetime.now(timezone.utc)
 
-keep_alive.register(bot)  
 
 
 @bot.event
@@ -7969,5 +7968,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    keep_alive.setup_auto_start(bot) 
+    keep_alive()
     main()
