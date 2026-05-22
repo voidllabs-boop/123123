@@ -17,7 +17,7 @@ A comprehensive, production-grade moderation bot with:
 """
 
 from __future__ import annotations
-import keep_alive
+
 import asyncio
 import copy
 import io
@@ -42,6 +42,9 @@ from disnake import (
 )
 from disnake.ext import commands, tasks
 from motor.motor_asyncio import AsyncIOMotorClient
+from keep_alive import keep_alive  # Импортируем функцию из файла
+
+keep_alive()  # Теперь это сработает отлично!
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  CONSTANTS
@@ -57,7 +60,7 @@ COLORS: dict[str, int] = {
     "info": 0x5865F2,
 }
 
-VERSION = "6.0.0"
+VERSION = "1.0.0"
 TICKET_CATEGORY_NAME = "Tickets"
 ARCHIVE_CATEGORY_NAME = "Archived Tickets"
 MAX_TRANSCRIPT_MESSAGES = 500
@@ -7968,5 +7971,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    keep_alive()
     main()
