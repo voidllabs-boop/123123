@@ -1,186 +1,186 @@
-# Haven
+# Uma Enjoyers HQ
 
-Модерационный Discord-бот на Python (disnake >= 2.11) с MongoDB и Discord Components V2.
+A Discord moderation bot built with Python (disnake >= 2.11) using MongoDB and Discord Components V2.
 
-Полнофункциональный бот для модерации, управления и автоматизации Discord-сервера.
-Все сообщения -- через Components V2, без embeds и без эмодзи. Хранение данных -- MongoDB.
+A fully featured bot for moderation, management, and automation of Discord servers.
+All messages use Components V2 -- no embeds and no emojis. Data storage via MongoDB.
 
-## Запуск
+## Getting Started
 
 ```bash
 pip install -r requirements.txt
 HAVEN_TOKEN=<your-bot-token> MONGO_URI=mongodb://localhost:27017 python main.py
 ```
 
-**Переменные окружения:**
-| Переменная | Описание | Умолчание |
-|-----------|----------|-----------|
-| `HAVEN_TOKEN` | Токен бота (обязательно) | -- |
-| `MONGO_URI` | URI подключения к MongoDB | `mongodb://localhost:27017` |
-| `MONGO_DB` | Имя базы данных | `haven` |
+**Environment Variables:**
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HAVEN_TOKEN` | Bot token (required) | -- |
+| `MONGO_URI` | MongoDB connection URI | `mongodb://localhost:27017` |
+| `MONGO_DB` | Database name | `haven` |
 
-## Возможности (99 команд)
+## Features (99 commands)
 
-### Модерация
-| Команда | Описание |
-|---------|----------|
-| `/mute` | Тайм-аут с интерактивным выбором длительности |
-| `/unmute` | Снять тайм-аут |
-| `/warn` | Предупреждение (+ авто-действия по порогам) |
-| `/warnings` | Список предупреждений |
-| `/delwarn` | Удалить конкретный варн |
-| `/clearwarns` | Очистить все варны |
-| `/kick` | Кикнуть участника |
-| `/softban` | Бан + разбан (удаление сообщений) |
-| `/ban` | Бан (с поддержкой временного) |
-| `/unban` | Разбан по ID |
-| `/massban` | Бан нескольких по ID |
-| `/purge` | Удаление сообщений с фильтрами |
-| `/purgeuser` | Удалить сообщения конкретного пользователя |
-| `/slowmode` | Медленный режим |
-| `/slowmodepresets` | Пресеты slowmode (calm/moderate/strict/lockdown) |
-| `/lock` / `/unlock` | Заблокировать / разблокировать канал |
-| `/lockdown` / `/unlockdown` | Блокировка всего сервера |
-| `/nuke` | Пересоздать канал |
-| `/quarantine` / `/unquarantine` | Карантин с сохранением ролей |
-| `/massnick` | Массовое изменение ников |
+### Moderation
+| Command | Description |
+|---------|-------------|
+| `/mute` | Timeout with interactive duration selection |
+| `/unmute` | Remove timeout |
+| `/warn` | Warning (+ auto-actions by thresholds) |
+| `/warnings` | List warnings |
+| `/delwarn` | Delete a specific warning |
+| `/clearwarns` | Clear all warnings |
+| `/kick` | Kick a member |
+| `/softban` | Ban + unban (message deletion) |
+| `/ban` | Ban (with temporary ban support) |
+| `/unban` | Unban by ID |
+| `/massban` | Ban multiple by ID |
+| `/purge` | Delete messages with filters |
+| `/purgeuser` | Delete messages from a specific user |
+| `/slowmode` | Slow mode |
+| `/slowmodepresets` | Slowmode presets (calm/moderate/strict/lockdown) |
+| `/lock` / `/unlock` | Lock / unlock a channel |
+| `/lockdown` / `/unlockdown` | Lock the entire server |
+| `/nuke` | Recreate a channel |
+| `/quarantine` / `/unquarantine` | Quarantine with role preservation |
+| `/massnick` | Mass nickname change |
 
-### Система правил
-| Команда | Описание |
-|---------|----------|
-| `/rules add/remove/edit/list/clear` | Управление правилами |
-| `/rules display` | Красивая панель правил в канале |
-| `/rules setrole` | Кнопка "Принять правила" с выдачей роли |
+### Rules System
+| Command | Description |
+|---------|-------------|
+| `/rules add/remove/edit/list/clear` | Manage rules |
+| `/rules display` | Beautiful rules panel in a channel |
+| `/rules setrole` | "Accept rules" button with role assignment |
 
-### Анти-нюк защита
-| Команда | Описание |
-|---------|----------|
-| `/antinuke enable/disable/status` | Защита от нюка |
-| `/antinuke trusted` | Доверенные пользователи |
+### Anti-Nuke Protection
+| Command | Description |
+|---------|-------------|
+| `/antinuke enable/disable/status` | Nuke protection |
+| `/antinuke trusted` | Trusted users |
 
-### Авто-модерация
-| Команда | Описание |
-|---------|----------|
-| `/automod toggle` | Включить/выключить модуль |
-| `/automod status` | Статус модулей |
-| `/warnthresholds set/remove/list` | Авто-действия по кол-ву варнов |
-| `/whitelist add/remove/list` | Белый список доменов |
+### Auto-Moderation
+| Command | Description |
+|---------|-------------|
+| `/automod toggle` | Enable/disable module |
+| `/automod status` | Module status |
+| `/warnthresholds set/remove/list` | Auto-actions by warning count |
+| `/whitelist add/remove/list` | Domain whitelist |
 
-Модули: анти-спам, анти-рейд, анти-капс, анти-ссылки, анти-инвайты, анти-упоминания
+Modules: anti-spam, anti-raid, anti-caps, anti-links, anti-invites, anti-mentions
 
-### Голосовые каналы
+### Voice Channels
 `/voice kick/move/moveall/limit/mute/unmute/deafen/undeafen`
 
-### Управление каналами и ветками
-| Команда | Описание |
-|---------|----------|
-| `/channel clone/rename/topic/create/delete` | Каналы |
-| `/thread create/archive/lock/unlock/rename` | Ветки |
+### Channel and Thread Management
+| Command | Description |
+|---------|-------------|
+| `/channel clone/rename/topic/create/delete` | Channels |
+| `/thread create/archive/lock/unlock/rename` | Threads |
 
-### Тикет-система
-- Панель с 6 категориями
-- 4 уровня приоритета
-- Claim, транскрипт, архив, удаление
+### Ticket System
+- Panel with 6 categories
+- 4 priority levels
+- Claim, transcript, archive, deletion
 
-### Модмейл
-| Команда | Описание |
-|---------|----------|
-| `/modmail` | Анонимное обращение к модераторам |
-| `/modmailreply` | Ответ через ЛС |
+### Modmail
+| Command | Description |
+|---------|-------------|
+| `/modmail` | Anonymous message to moderators |
+| `/modmailreply` | Reply via DM |
 
-### Самоназначаемые роли
-`/selfroles create/addrole/send` -- панели ролей с dropdown
+### Self-Assignable Roles
+`/selfroles create/addrole/send` -- role panels with dropdown
 
-### Информация
-| Команда | Описание |
-|---------|----------|
-| `/userinfo`, `/avatar`, `/banner` | Пользователь |
-| `/serverinfo`, `/serversettings` | Сервер |
-| `/roleinfo`, `/rolehierarchy`, `/rolecount` | Роли |
-| `/channelinfo`, `/channelcount` | Каналы |
-| `/history`, `/stats`, `/modleaderboard` | Модерация |
-| `/invites`, `/inviteinfo`, `/createinvite` | Приглашения |
-| `/boosts`, `/botlist`, `/membercount` | Статистика |
-| `/oldestmembers`, `/newestmembers`, `/joinposition` | Участники |
-| `/slowmodeinfo`, `/messagestats` | Аналитика |
-| `/permissions`, `/color`, `/firstmessage`, `/topic` | Утилиты |
-| `/whois`, `/emojiinfo` | Поиск |
+### Information
+| Command | Description |
+|---------|-------------|
+| `/userinfo`, `/avatar`, `/banner` | User |
+| `/serverinfo`, `/serversettings` | Server |
+| `/roleinfo`, `/rolehierarchy`, `/rolecount` | Roles |
+| `/channelinfo`, `/channelcount` | Channels |
+| `/history`, `/stats`, `/modleaderboard` | Moderation |
+| `/invites`, `/inviteinfo`, `/createinvite` | Invites |
+| `/boosts`, `/botlist`, `/membercount` | Statistics |
+| `/oldestmembers`, `/newestmembers`, `/joinposition` | Members |
+| `/slowmodeinfo`, `/messagestats` | Analytics |
+| `/permissions`, `/color`, `/firstmessage`, `/topic` | Utilities |
+| `/whois`, `/emojiinfo` | Lookup |
 
-### Инструменты
-| Команда | Описание |
-|---------|----------|
-| `/note add/list/delete/clear` | Заметки модераторов |
-| `/role add/remove/members` | Управление ролями |
-| `/roleall` | Массовая выдача ролей |
-| `/rolecolor` | Изменение цвета роли |
-| `/reactionrole create/addrole/send` | Реакционные роли |
-| `/afk` | AFK статус |
-| `/remind` | Напоминания |
-| `/giveaway start/end/reroll` | Розыгрыши |
-| `/poll create` | Голосования |
-| `/snipe`, `/editsnipe` | Удаленные/редактированные сообщения |
-| `/suggest` | Система предложений |
-| `/report`, `/reports`, `/resolve` | Жалобы |
-| `/verify` | Верификация |
-| `/counting` | Игра-счетчик |
-| `/say`, `/announce` | Сообщения от бота |
-| `/embed` | Кастомные сообщения |
-| `/dm` | ЛС от бота |
-| `/emojisteal` | Копирование эмодзи |
-| `/sticky set/remove` | Закрепленные сообщения |
-| `/schedule message/list` | Отложенные сообщения |
-| `/customcmd add/remove/list` | Кастомные команды |
-| `/autoresponder add/remove/list` | Авто-ответы |
-| `/cleanup bots/links/images/contains/embeds` | Продвинутая очистка |
-| `/backup`, `/restore` | Экспорт/импорт настроек |
-| `/exportwarns`, `/exportcases` | Экспорт модерации |
-| `/nick set/reset` | Управление ником |
-| `/haven`, `/ping` | О боте |
+### Tools
+| Command | Description |
+|---------|-------------|
+| `/note add/list/delete/clear` | Moderator notes |
+| `/role add/remove/members` | Role management |
+| `/roleall` | Mass role assignment |
+| `/rolecolor` | Change role color |
+| `/reactionrole create/addrole/send` | Reaction roles |
+| `/afk` | AFK status |
+| `/remind` | Reminders |
+| `/giveaway start/end/reroll` | Giveaways |
+| `/poll create` | Polls |
+| `/snipe`, `/editsnipe` | Deleted/edited messages |
+| `/suggest` | Suggestion system |
+| `/report`, `/reports`, `/resolve` | Reports |
+| `/verify` | Verification |
+| `/counting` | Counting game |
+| `/say`, `/announce` | Bot messages |
+| `/embed` | Custom messages |
+| `/dm` | DMs from the bot |
+| `/emojisteal` | Copy emojis |
+| `/sticky set/remove` | Sticky messages |
+| `/schedule message/list` | Scheduled messages |
+| `/customcmd add/remove/list` | Custom commands |
+| `/autoresponder add/remove/list` | Auto-responses |
+| `/cleanup bots/links/images/contains/embeds` | Advanced cleanup |
+| `/backup`, `/restore` | Export/import settings |
+| `/exportwarns`, `/exportcases` | Export moderation |
+| `/nick set/reset` | Nickname management |
+| `/haven`, `/ping` | About the bot |
 
-### Логирование событий
-- Вход / выход участников (+ вехи)
-- Изменение ролей
-- Удаление / редактирование сообщений
-- Создание / удаление каналов и ролей
-- Бан / разбан (+ анти-нюк)
-- Голосовые каналы
+### Event Logging
+- Member join / leave (+ milestones)
+- Role changes
+- Message deletion / editing
+- Channel / role creation / deletion
+- Ban / unban (+ anti-nuke)
+- Voice channels
 
-## Хранилище (MongoDB)
+## Storage (MongoDB)
 
-Бот использует MongoDB для хранения всех данных. Коллекции:
+The bot uses MongoDB for all data storage. Collections:
 
-| Коллекция | Содержимое |
-|-----------|-----------|
-| `config` | Настройки серверов |
-| `warnings` | Предупреждения |
-| `cases` | Кейсы модерации |
-| `tickets` | Тикеты |
-| `tempbans` | Временные баны |
-| `rules` | Правила серверов |
-| `warnthresholds` | Пороги варнов |
-| `notes` | Заметки модераторов |
-| `modmail` | Обращения модмейла |
-| `selfroles` | Панели ролей |
-| `customcmds` | Кастомные команды |
-| `autoresponders` | Авто-ответы |
-| `scheduled` | Отложенные сообщения |
-| `quarantined` | Карантин |
-| `antinuke_trusted` | Доверенные (анти-нюк) |
-| `whitelist` | Белый список доменов |
-| `reminders` | Напоминания |
-| `giveaways` | Розыгрыши |
-| `reports` | Жалобы |
-| `suggestions` | Предложения |
+| Collection | Contents |
+|------------|----------|
+| `config` | Server settings |
+| `warnings` | Warnings |
+| `cases` | Moderation cases |
+| `tickets` | Tickets |
+| `tempbans` | Temporary bans |
+| `rules` | Server rules |
+| `warnthresholds` | Warning thresholds |
+| `notes` | Moderator notes |
+| `modmail` | Modmail messages |
+| `selfroles` | Role panels |
+| `customcmds` | Custom commands |
+| `autoresponders` | Auto-responses |
+| `scheduled` | Scheduled messages |
+| `quarantined` | Quarantine |
+| `antinuke_trusted` | Trusted users (anti-nuke) |
+| `whitelist` | Domain whitelist |
+| `reminders` | Reminders |
+| `giveaways` | Giveaways |
+| `reports` | Reports |
+| `suggestions` | Suggestions |
 
-## Технические детали
+## Technical Details
 
 - Python 3.11+
 - disnake >= 2.11
 - MongoDB (motor >= 3.3)
-- Discord Components V2 (без embeds)
-- Все в одном файле `main.py` (~7800 строк)
-- 99 slash-команд
-- 4 фоновые задачи: темпбаны (20с), напоминания (15с), розыгрыши (30с), расписание (30с)
-- Монохромная цветовая схема без эмодзи
-- Интерфейс полностью на русском
-- In-memory кеш + асинхронная запись в MongoDB
+- Discord Components V2 (no embeds)
+- All in one file `main.py` (~7800 lines)
+- 99 slash commands
+- 4 background tasks: tempbans (20s), reminders (15s), giveaways (30s), schedule (30s)
+- Monochrome color scheme with no emojis
+- Interface fully in English
+- In-memory cache + async writes to MongoDB
