@@ -1,3 +1,2 @@
 disnake>=2.11
-motor>=3.3
 aiohttp>=3.9
