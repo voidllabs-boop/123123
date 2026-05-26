@@ -1,23 +1,22 @@
 # Uma Enjoyers HQ
 
-A Discord moderation bot built with Python (disnake >= 2.11) using MongoDB and Discord Components V2.
+A Discord moderation bot built with Python (disnake >= 2.11) using Discord Components V2.
 
 A fully featured bot for moderation, management, and automation of Discord servers.
-All messages use Components V2 -- no embeds and no emojis. Data storage via MongoDB.
+All messages use Components V2 -- no embeds and no emojis. Data storage via local JSON files.
 
 ## Getting Started
 
 ```bash
 pip install -r requirements.txt
-HAVEN_TOKEN=<your-bot-token> MONGO_URI=mongodb://localhost:27017 python main.py
+HAVEN_TOKEN=<your-bot-token> python main.py
 ```
 
 **Environment Variables:**
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HAVEN_TOKEN` | Bot token (required) | -- |
-| `MONGO_URI` | MongoDB connection URI | `mongodb://localhost:27017` |
-| `MONGO_DB` | Database name | `haven` |
+| `DATA_DIR` | Directory for JSON data files | `data` |
 
 ## Features (99 commands)
 
@@ -145,12 +144,12 @@ Modules: anti-spam, anti-raid, anti-caps, anti-links, anti-invites, anti-mention
 - Ban / unban (+ anti-nuke)
 - Voice channels
 
-## Storage (MongoDB)
+## Storage (JSON Files)
 
-The bot uses MongoDB for all data storage. Collections:
+The bot uses local JSON files for all data storage (in the `data/` directory). Files:
 
-| Collection | Contents |
-|------------|----------|
+| File | Contents |
+|------|----------|
 | `config` | Server settings |
 | `warnings` | Warnings |
 | `cases` | Moderation cases |
@@ -176,11 +175,11 @@ The bot uses MongoDB for all data storage. Collections:
 
 - Python 3.11+
 - disnake >= 2.11
-- MongoDB (motor >= 3.3)
+- No external database required (JSON file storage)
 - Discord Components V2 (no embeds)
 - All in one file `main.py` (~7800 lines)
 - 99 slash commands
 - 4 background tasks: tempbans (20s), reminders (15s), giveaways (30s), schedule (30s)
 - Monochrome color scheme with no emojis
 - Interface fully in English
-- In-memory cache + async writes to MongoDB
+- In-memory cache + synchronous writes to JSON files

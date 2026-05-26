@@ -41,7 +41,7 @@ from disnake import (
     SeparatorSpacing,
 )
 from disnake.ext import commands, tasks
-from motor.motor_asyncio import AsyncIOMotorClient
+from pathlib import Path
 from keep_alive import keep_alive  # Import the function from file
 
 keep_alive()  # Now this works perfectly!
@@ -88,17 +88,11 @@ intents.message_content = True
 bot = commands.InteractionBot(intents=intents)
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  MONGODB — direct connection, no JSON fallback
+#  JSON FILE STORAGE
 # ═══════════════════════════════════════════════════════════════════════════
 
-_MONGO_URI = "mongodb+srv://ruslan:ruslan@cluster0.bujraxc.mongodb.net/?appName=Cluster0"
-_mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(  # type: ignore[type-arg]
-    _MONGO_URI,
-    serverSelectionTimeoutMS=5000,
-    connectTimeoutMS=5000,
-    tls=True,
-)
-_db = _mongo_client["haven"]
+_DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 _COLLECTIONS = [
     "config", "warnings", "tickets", "tempbans", "cases", "notes",
@@ -119,26 +113,28 @@ _snipe_cache: dict[int, dict[str, Any]] = {}
 _editsnipe_cache: dict[int, dict[str, Any]] = {}
 
 
-async def _mongo_load_all() -> None:
-    """Load all collections from MongoDB into in-memory cache."""
-    await _db.command("ping")
-    print("MongoDB: connected")
+def _json_load_all() -> None:
+    """Load all collections from JSON files into in-memory cache."""
     for name in _COLLECTIONS:
-        doc = await _db[name].find_one({"_id": "root"})
-        _store[f"{name}.json"] = doc.get("data", {}) if doc else {}
+        fp = _DATA_DIR / f"{name}.json"
+        if fp.exists():
+            try:
+                _store[f"{name}.json"] = json.loads(fp.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                _store[f"{name}.json"] = {}
+        else:
+            _store[f"{name}.json"] = {}
+    print("Storage: JSON files loaded")
 
 
-async def _mongo_write(col: str, data: dict) -> None:
-    """Write data to MongoDB (fire-and-forget)."""
+def _json_write(col: str, data: dict) -> None:
+    """Write data to a JSON file."""
     try:
+        fp = _DATA_DIR / f"{col}.json"
         safe = copy.deepcopy(data)
-        await _db[col].replace_one(
-            {"_id": "root"},
-            {"_id": "root", "data": safe},
-            upsert=True,
-        )
+        fp.write_text(json.dumps(safe, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
-        print(f"[MongoDB] write error in '{col}': {e}")
+        print(f"[Storage] write error in '{col}': {e}")
 
 
 def _load(path: str, default: Any = None) -> Any:
@@ -150,11 +146,7 @@ def _save(path: str, data: Any) -> None:
     key = path if path.endswith(".json") else f"{path}.json"
     _store[key] = data
     col = key.replace(".json", "")
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_mongo_write(col, data))
-    except RuntimeError:
-        pass
+    _json_write(col, data)
 
 
 def save(key: str) -> tuple[dict, Any]:
@@ -7938,14 +7930,10 @@ _bot_start_time = datetime.now(timezone.utc)
 
 @bot.event
 async def on_ready() -> None:
-    try:
-        await _mongo_load_all()
-    except Exception as e:
-        print(f"[FATAL] MongoDB unavailable: {e}")
-        raise SystemExit(1)
+    _json_load_all()
     print(f"Uma Enjoyers HQ v{VERSION} is online as {bot.user} ({bot.user.id})")  # type: ignore[union-attr]
     print(f"Guilds: {len(bot.guilds)} | Commands: {len(list(bot.all_slash_commands))}")
-    print("Storage: MongoDB")
+    print(f"Storage: JSON files ({_DATA_DIR})")
     if not tempban_check.is_running():
         tempban_check.start()
     if not reminder_check.is_running():
